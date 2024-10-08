@@ -1,25 +1,24 @@
-
 const express = require("express");
 const axios = require("axios");
 const qs = require("qs");
 const cheerio = require("cheerio");
 const cors = require("cors");
-const { closeSync } = require("fs");
 const fs = require("fs");
 const pool = require('./Connection/Postgres');
 const nodemailer = require("nodemailer");
-const { log } = require("console");
 const path = require('path');
-const https = require('https');
-const { Buffer } = require('buffer');
+
 
 const app = express();
 //const PORT = 8000;
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const PORT = process.env.PORT || 8000;
 let sharedData = { captchaCode: '' };  
 
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
+
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -89,13 +88,14 @@ const fetchFormValues = async () => {
       mytoken,
     };
   } catch (error) {
-    throw error;
+    response.status(500).send("Internal Server Error t");
+
   }
 };
 
 app.post("/submit-form", async (req, res) => {
   const mobileNumber = req.body.mobileNumber;
-
+console.log(mobileNumber);
   try {
     const {
       viewState,
@@ -326,73 +326,80 @@ app.get('/get-captcha', async (req, res) => {
   const { concatecookie } = req.query;
 
   const config = {
-    method: 'get',
-    url: 'https://mis.ewaybillgst.gov.in/ewb_ctz/Captcha.aspx',
-    responseType: 'arraybuffer',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0',
-      'Accept': 'image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5',
-      'Accept-Language': 'en-US,en;q=0.5',
-      'Accept-Encoding': 'gzip, deflate, br, zstd',
-      'Connection': 'keep-alive',
-      'Referer': 'https://mis.ewaybillgst.gov.in/ewb_ctz/citizen/EnrolmentCitizen.aspx',
-      'Sec-Fetch-Dest': 'image',
-      'Sec-Fetch-Mode': 'no-cors',
-      'Sec-Fetch-Site': 'same-origin',
-      'Priority': 'u=5, i',
-      'Cookie': concatecookie,
-    },
+      method: 'get',
+      url: 'https://mis.ewaybillgst.gov.in/ewb_ctz/Captcha.aspx',
+      responseType: 'arraybuffer',
+      headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0',
+          'Accept': 'image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate, br, zstd',
+          'Connection': 'keep-alive',
+          'Referer': 'https://mis.ewaybillgst.gov.in/ewb_ctz/citizen/EnrolmentCitizen.aspx',
+          'Sec-Fetch-Dest': 'image',
+          'Sec-Fetch-Mode': 'no-cors',
+          'Sec-Fetch-Site': 'same-origin',
+          'Priority': 'u=5, i',
+          'Cookie': concatecookie,
+      },
   };
 
   try {
-    const response = await axios(config);
+      const response = await axios(config);
 
-    // Check for invalid captcha
-    if (response.data.includes("alert('Invalid Captcha')")) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid Captcha. Please try again.'
-      });
-    }
-    if (response.headers['content-type'].includes('image')) {
-      const captchaImageData = response.data;
-
-      const captchaDir = path.join(__dirname, 'captcha_images');
-      const captchaFilePath = path.join(captchaDir, 'captcha.png');
-
-      if (!fs.existsSync(captchaDir)) {
-        fs.mkdirSync(captchaDir);
+      // Check for invalid captcha
+      if (response.data.includes("alert('Invalid Captcha')")) {
+          return res.status(400).json({
+              success: false,
+              message: 'Invalid Captcha. Please try again.'
+          });
       }
 
-      fs.writeFileSync(captchaFilePath, captchaImageData);
+      if (response.headers['content-type'].includes('image')) {
+          const captchaImageData = response.data;
 
-      res.json({
-        success: true,
-        message: 'Captcha retrieved successfully.',
-        data: {
-          imageUrl:`http://localhost:8000/captcha-images/captcha.png`, // Ensure the key is 'imageUrl'
-        },
-      });
-    } else {
-      throw new Error('The response did not contain an image');
-    }
+          const captchaDir = path.join(__dirname, 'captcha_images');
+          const captchaFilePath = path.join(captchaDir, 'captcha.png');
+
+          if (!fs.existsSync(captchaDir)) {
+              fs.mkdirSync(captchaDir);
+          }
+
+          fs.writeFileSync(captchaFilePath, captchaImageData);
+
+          // Get the host information
+          const host = req.get('host'); // Get the host from the request
+          const protocol = req.protocol; // Get the request protocol (http or https)
+
+          // Construct the URL dynamically
+          const imageUrl = `${protocol}://${host}/captcha-images/captcha.png`;
+
+          res.json({
+              success: true,
+              message: 'Captcha retrieved successfully.',
+              data: {
+                  imageUrl: imageUrl, // Use the dynamically constructed URL
+              },
+          });
+      } else {
+          throw new Error('The response did not contain an image');
+      }
   } catch (error) {
-    console.error('Error:', error.message);
-    if (!res.headersSent) {
-      res.status(500).send('Error processing captcha');
-    }
+      console.error('Error:', error.message);
+      if (!res.headersSent) {
+          res.status(500).send('Error processing captcha');
+      }
   }
 });
 
 app.use('/captcha-images', express.static(path.join(__dirname, 'captcha_images')));
 
-//generate bill 
 
 app.post('/get_details', async (req, res) => {
   try {
       const { viewState, viewStateGenerator, eventValidation, concatecookie, mytoken ,captchaCode} = req.body;
       
-      console.log("Captcha Code in get_details:", captchaCode);  // Ensure this is logged correctly
+      console.log("Captcha Code in get_details:", captchaCode);  
       var data = qs.stringify({
         '__EVENTTARGET': '',
         '__EVENTARGUMENT': '',
@@ -400,7 +407,7 @@ app.post('/get_details', async (req, res) => {
         '__VIEWSTATE': viewState,
         '__VIEWSTATEGENERATOR': viewStateGenerator,
         '__SCROLLPOSITIONX': '0',
-        '__SCROLLPOSITIONY': '384',  // Updated scroll position Y value
+        '__SCROLLPOSITIONY': '384',  
         '__VIEWSTATEENCRYPTED': '',
         '__EVENTVALIDATION': eventValidation,
         'ctl00$ContentPlaceHolder1$mytoken': mytoken,
@@ -768,7 +775,7 @@ GROUP BY
     `, []);
 
        if (result.rows.length > 0) {
-      res.json(result.rows); // Return the array of results
+      res.json(result.rows); 
     } else {
       res.status(404).json({ error: 'No data found' });
     }
@@ -776,9 +783,24 @@ GROUP BY
     console.error('Error executing query', error.stack);
     res.status(500).json({ error: 'Internal Server Error' });
   } finally {
-    client.release(); // Always release the client back to the pool
+    client.release(); 
   }
 });
+
+
+app.get('/machines/active', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT sr_no, machine_no, ip_address FROM machine_master WHERE status != 'Deleted';`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error executing query', err.stack);
+    res.status(500).json({ error: 'Database query failed' });
+  }
+});
+
+
 
 
 app.listen(PORT, () => {
